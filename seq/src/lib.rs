@@ -81,16 +81,59 @@ pub fn seq(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     }
 
     fn replace(ts: TokenStream, s: &str, i: i32) -> TokenStream {
-        TokenStream::from_iter(ts.into_iter().map(|tt| match tt {
-            TokenTree::Group(group) => TokenTree::Group(proc_macro2::Group::new(
-                group.delimiter(),
-                replace(group.stream(), s, i),
-            )),
-            TokenTree::Ident(ident) if ident == s => {
-                TokenTree::Literal(proc_macro2::Literal::i32_unsuffixed(i))
-            }
-            _ => tt,
-        }))
+        let tt_vec = ts.into_iter().collect::<Vec<TokenTree>>();
+        let length = tt_vec.len();
+        let mut result = Vec::with_capacity(length);
+        let mut idx = 0;
+        while idx < length {
+            let tt = &tt_vec[idx];
+            let r = match tt {
+                TokenTree::Group(group) => {
+                    idx += 1;
+                    TokenTree::Group(proc_macro2::Group::new(
+                        group.delimiter(),
+                        replace(group.stream(), s, i),
+                    ))
+                }
+                TokenTree::Ident(ident) if ident == s => {
+                    idx += 1;
+                    TokenTree::Literal(proc_macro2::Literal::i32_unsuffixed(i))
+                }
+                TokenTree::Ident(ident) if idx < length - 2 => {
+                    match (&tt_vec[idx + 1], &tt_vec[idx + 2]) {
+                        (TokenTree::Punct(punct_1), TokenTree::Ident(ident_2))
+                            if punct_1.as_char() == '#' && ident_2 == s =>
+                        {
+                            let mut ident = quote::format_ident!("{}{}", ident, i as u32);
+                            idx += 3;
+                            if idx < length - 1 {
+                                match (&tt_vec[idx], &tt_vec[idx + 1]) {
+                                    (TokenTree::Punct(punct), TokenTree::Ident(ident_1))
+                                        if punct.as_char() == '#' =>
+                                    {
+                                        ident = quote::format_ident!("{}{}", ident, ident_1);
+                                        idx += 2;
+                                    }
+                                    _ => {}
+                                };
+                            }
+                            proc_macro2::TokenTree::Ident(ident)
+                        }
+                        _ => {
+                            idx += 1;
+                            tt.clone()
+                        }
+                    }
+                }
+                _ => {
+                    idx += 1;
+                    tt.clone()
+                }
+            };
+            result.push(r);
+        }
+
+        TokenStream::from_iter(result.into_iter())
     }
 
     let output = TokenStream::from_iter(
@@ -99,4 +142,3 @@ pub fn seq(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
     output.into()
 }
-
