@@ -1,4 +1,4 @@
-use proc_macro2::{TokenStream, TokenTree};
+use proc_macro2::{Delimiter, TokenStream, TokenTree};
 use std::iter::FromIterator;
 use syn::{parse::Parse, spanned::Spanned, token, Expr, ExprLit, ExprRange, Ident, Lit, Token};
 
@@ -80,7 +80,7 @@ pub fn seq(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         to -= 1;
     }
 
-    fn replace(ts: TokenStream, s: &str, i: i32) -> TokenStream {
+    fn replace_loop_var(ts: TokenStream, s: &str, i: i32) -> TokenStream {
         let tt_vec = ts.into_iter().collect::<Vec<TokenTree>>();
         let length = tt_vec.len();
         let mut result = Vec::with_capacity(length);
@@ -92,7 +92,7 @@ pub fn seq(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                     idx += 1;
                     TokenTree::Group(proc_macro2::Group::new(
                         group.delimiter(),
-                        replace(group.stream(), s, i),
+                        replace_loop_var(group.stream(), s, i),
                     ))
                 }
                 TokenTree::Ident(ident) if ident == s => {
@@ -136,9 +136,65 @@ pub fn seq(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         TokenStream::from_iter(result.into_iter())
     }
 
-    let output = TokenStream::from_iter(
-        (from..=to).map(|v| replace((&seq.content).clone(), &loop_var.to_string(), v)),
-    );
+    fn replace_section(
+        ts: TokenStream,
+        from: i32,
+        to: i32,
+        loop_var: &Ident,
+    ) -> (TokenStream, bool) {
+        let tt_vec = ts.into_iter().collect::<Vec<TokenTree>>();
+        let length = tt_vec.len();
+        let mut result = Vec::with_capacity(length);
+        let mut idx = 0;
+        let mut replaced = false;
 
-    output.into()
+        while idx < length {
+            let tt = &tt_vec[idx];
+
+            if let TokenTree::Group(g) = tt {
+                let ts = replace_section(g.stream(), from, to, loop_var);
+                result.push(TokenTree::Group(proc_macro2::Group::new(
+                    g.delimiter(),
+                    ts.0,
+                )));
+                replaced = replaced || ts.1;
+                idx += 1;
+                continue;
+            }
+
+            if length >= 3 && idx <= length - 3 {
+                match (tt, &tt_vec[idx + 1], &tt_vec[idx + 2]) {
+                    (TokenTree::Punct(tt), TokenTree::Group(g), TokenTree::Punct(p))
+                        if tt.as_char() == '#'
+                            && g.delimiter() == Delimiter::Parenthesis
+                            && p.as_char() == '*' =>
+                    {
+                        for ts in (from..=to)
+                            .map(|v| replace_loop_var(g.stream(), &loop_var.to_string(), v))
+                        {
+                            result.extend(ts.into_iter());
+                        }
+                        replaced = true;
+                        idx += 3;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            result.push(tt.clone());
+            idx += 1;
+        }
+
+        (TokenStream::from_iter(result), replaced)
+    }
+
+    let (ts, replaced) = replace_section(seq.content.clone(), from, to, loop_var);
+    if !replaced {
+        TokenStream::from_iter(
+            (from..=to).map(|v| replace_loop_var(ts.clone(), &loop_var.to_string(), v)),
+        )
+    } else {
+        ts
+    }
+    .into()
 }
