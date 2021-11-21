@@ -23,7 +23,13 @@
 use seq::seq;
 
 seq!(N in 1..4 {
-    fn f#N () -> u64 {
+    fn f #N () -> u64 {
+        N * 2
+    }
+});
+
+seq!(N in 1..4 {
+    fn f #N #_suffix () -> u64 {
         N * 2
     }
 });
@@ -37,8 +43,15 @@ fn f0() -> u64 {
     100
 }
 
+fn f0_suffix() -> u64 {
+    101
+}
+
 fn main() {
     let sum = f0() + f1() + f2() + f3();
 
+    let sum_suffix = f0_suffix() + f1_suffix() + f2_suffix() + f3_suffix();
+
     assert_eq!(sum, 100 + 2 + 4 + 6);
+    assert_eq!(sum_suffix, 101 + 2 + 4 + 6);
 }
